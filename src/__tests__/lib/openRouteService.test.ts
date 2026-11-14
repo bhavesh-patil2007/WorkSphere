@@ -48,7 +48,7 @@ describe("OpenRouteService accessible routing", () => {
     const result = await fetchAccessibleRoute(
       { lat: 40.73, lng: -73.99 },
       { lat: 40.731, lng: -73.989 },
-      { apiKey: "test-key", fetchFn: fetchFn as unknown as typeof fetch },
+      { apiKey: "test-key", fetchFn: fetchFn as unknown as typeof fetch, cache: false },
     );
 
     expect(fetchFn).toHaveBeenCalledWith(
@@ -84,7 +84,7 @@ describe("OpenRouteService accessible routing", () => {
     await expect(fetchAccessibleRoute(
       { lat: 40.73, lng: -73.99 },
       { lat: 40.731, lng: -73.989 },
-      { apiKey: "test-key", fetchFn: fetchFn as unknown as typeof fetch },
+      { apiKey: "test-key", fetchFn: fetchFn as unknown as typeof fetch, cache: false },
     )).rejects.toMatchObject({ statusCode: 502 });
   });
 });

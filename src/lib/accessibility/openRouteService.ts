@@ -1,7 +1,9 @@
+import { createHash } from "node:crypto";
 import {
   AccessibleRouter,
   type RouteSegment,
 } from "@/core/accessibility/AccessibleRouter";
+import { getRedis } from "@/lib/redis";
 
 export interface AccessibilityCoordinate {
   lat: number;
@@ -243,6 +245,31 @@ export interface FetchAccessibleRouteOptions {
   apiKey?: string;
   baseUrl?: string;
   fetchFn?: typeof fetch;
+  /** Disable shared Redis caching in tests or for explicit fresh-route requests. */
+  cache?: boolean;
+}
+
+const ROUTE_CACHE_TTL_SECONDS = 300;
+
+async function readCachedRoute(key: string): Promise<AccessibleRouteResult | null> {
+  const redis = getRedis();
+  if (!redis) return null;
+  try {
+    return await redis.get<AccessibleRouteResult>(key);
+  } catch (error) {
+    console.warn("[Accessibility] Redis route-cache read failed:", error);
+    return null;
+  }
+}
+
+async function writeCachedRoute(key: string, value: AccessibleRouteResult): Promise<void> {
+  const redis = getRedis();
+  if (!redis) return;
+  try {
+    await redis.set(key, value, { ex: ROUTE_CACHE_TTL_SECONDS });
+  } catch (error) {
+    console.warn("[Accessibility] Redis route-cache write failed:", error);
+  }
 }
 
 export async function fetchAccessibleRoute(
@@ -268,6 +295,16 @@ export async function fetchAccessibleRoute(
   const fetchFn = options.fetchFn ?? fetch;
   const maxAllowedGrade = Math.max(1, Math.min(20, options.maxAllowedGradePercent ?? 8.33));
   const orsMaximumIncline = maxAllowedGrade <= 3 ? 3 : maxAllowedGrade <= 6 ? 6 : maxAllowedGrade <= 10 ? 10 : 15;
+  const cacheKey = `accessibility:route:v1:${createHash("sha256").update(JSON.stringify({
+    profile,
+    start: [start.lat, start.lng],
+    end: [end.lat, end.lng],
+    maxAllowedGrade,
+  })).digest("hex")}`;
+  if (options.cache !== false) {
+    const cached = await readCachedRoute(cacheKey);
+    if (cached) return cached;
+  }
 
   let response: Response;
   try {
@@ -408,7 +445,7 @@ export async function fetchAccessibleRoute(
     }
   });
 
-  return {
+  const result: AccessibleRouteResult = {
     geometry,
     totalDistanceMeters: Number(properties.summary?.distance) || evaluation.totalDistance,
     totalDurationSeconds: Number(properties.summary?.duration) || evaluation.totalDuration,
@@ -417,4 +454,6 @@ export async function fetchAccessibleRoute(
     barriers,
     dataSource: "OpenRouteService",
   };
+  if (options.cache !== false) await writeCachedRoute(cacheKey, result);
+  return result;
 }
