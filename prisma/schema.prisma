@@ -65,7 +65,6 @@ model User {
   badges             UserBadge[]
   seatWaitlists      VenueSeatWaitlist[]
   liveFeedbacks      VenueLiveFeedback[]
-  slaAudits            VenueSlaAudit[]
   // Running total of verified deep-work minutes (see /api/zkp/deepwork)
   totalDeepWorkMinutes Int              @default(0)
 }
@@ -138,7 +137,8 @@ model Venue {
   safetyScore         Int?     // 1-5 crowdsourced safety rating for night workers
   slaPenaltyPoints     Int                 @default(0)
   slaComplianceScore   Float?
-  slaLastAuditedAt     DateTime?  ratings             VenueRating[]
+  slaLastAuditedAt     DateTime?
+  ratings              VenueRating[]
   favorites           Favorite[]
   bookings            Booking[]
   creatorId           String?
@@ -165,6 +165,7 @@ model Venue {
   beaconPathLossExponent Float?
   seatWaitlists       VenueSeatWaitlist[]
   liveFeedbacks       VenueLiveFeedback[]
+  slaAudits            VenueSlaAudit[]
 
   @@index([latitude, longitude])
   @@index([category])
