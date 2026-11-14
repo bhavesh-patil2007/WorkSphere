@@ -1,6 +1,5 @@
 import {
   AccessibleRouter,
-  type AccessibilityWeightedRoute,
   type RouteSegment,
 } from "@/core/accessibility/AccessibleRouter";
 
@@ -13,7 +12,7 @@ export interface AccessibleRouteResult {
   geometry: number[][];
   totalDistanceMeters: number;
   totalDurationSeconds: number;
-  evaluation: AccessibilityWeightedRoute;
+  evaluation: ReturnType<AccessibleRouter["evaluateRoute"]>;
   warnings: string[];
   barriers: Array<{
     type: string;
@@ -64,6 +63,30 @@ export function normalizeAccessibilityCoordinate(
 }
 
 type ExtraRange = [number, number, number];
+interface OrsStep {
+  distance?: number;
+  duration?: number;
+  instruction?: string;
+  name?: string;
+  way_points?: number[];
+}
+interface OrsRouteSegment {
+  steps?: OrsStep[];
+}
+interface OrsExtra {
+  values?: unknown;
+}
+interface OrsProperties {
+  summary?: { distance?: number; duration?: number };
+  segments?: OrsRouteSegment[];
+  extras?: Record<string, OrsExtra>;
+}
+interface OrsGeoJsonResponse {
+  features?: Array<{
+    geometry?: { coordinates?: unknown };
+    properties?: OrsProperties;
+  }>;
+}
 
 function rangesForStep(
   values: unknown,
@@ -71,32 +94,40 @@ function rangesForStep(
   end: number,
 ): number[] {
   if (!Array.isArray(values)) return [];
-  return (values as unknown[])
-    .filter((entry): entry is ExtraRange =>
-      Array.isArray(entry) &&
-      entry.length >= 3 &&
-      Number.isFinite(Number(entry[0])) &&
-      Number.isFinite(Number(entry[1])) &&
-      Number.isFinite(Number(entry[2])) &&
-      Number(entry[0]) <= end &&
-      Number(entry[1]) >= start,
-    )
-    .map((entry) => Number(entry[2]));
+  const matches: number[] = [];
+  for (const entry of values) {
+    if (!Array.isArray(entry) || entry.length < 3) continue;
+    const from = Number(entry[0]);
+    const to = Number(entry[1]);
+    const value = Number(entry[2]);
+    if (
+      Number.isFinite(from) &&
+      Number.isFinite(to) &&
+      Number.isFinite(value) &&
+      from <= end &&
+      to >= start
+    ) {
+      matches.push(value);
+    }
+  }
+  return matches;
 }
 
-function steepnessToPercent(value: number): number {
+function steepnessToConservativePercent(value: number): number {
+  // ORS values represent grade bands; use the upper band boundary so an
+  // interval that may exceed a mobility threshold is never understated.
   const mapping: Record<number, number> = {
-    [-5]: 16,
-    [-4]: 10,
-    [-3]: 7,
-    [-2]: 4,
-    [-1]: 1,
-    0: 0.5,
-    1: 1,
-    2: 4,
-    3: 7,
-    4: 10,
-    5: 16,
+    [-5]: 20,
+    [-4]: 15.99,
+    [-3]: 9.99,
+    [-2]: 6.99,
+    [-1]: 3.99,
+    0: 0.99,
+    1: 3.99,
+    2: 6.99,
+    3: 9.99,
+    4: 15.99,
+    5: 20,
   };
   return mapping[value] ?? 0;
 }
@@ -149,42 +180,38 @@ function elevationStats(points: number[][]): { gain: number; maxGrade: number } 
     const elevationDelta = current[2] - previous[2];
     const distance = distanceMeters(previous, current);
     if (elevationDelta > 0) gain += elevationDelta;
-    if (distance > 0) maxGrade = Math.max(maxGrade, (Math.abs(elevationDelta) / distance) * 100);
+    if (distance > 0) {
+      maxGrade = Math.max(maxGrade, (Math.abs(elevationDelta) / distance) * 100);
+    }
   }
   return { gain, maxGrade };
 }
 
-function overlappingStepValue(
-  extras: Record<string, any>,
-  name: string,
-  start: number,
-  end: number,
-): number[] {
-  return rangesForStep(extras?.[name]?.values, start, end);
-}
-
 function buildRouteSegments(
-  steps: any[],
+  steps: OrsStep[],
   geometry: number[][],
-  extras: Record<string, any>,
+  extras: Record<string, OrsExtra>,
 ): RouteSegment[] {
-  return steps.map((step, index) => {
-    const range = Array.isArray(step.way_points) ? step.way_points : [0, geometry.length - 1];
+  return steps.map((step) => {
+    const range = Array.isArray(step.way_points)
+      ? step.way_points
+      : [0, geometry.length - 1];
     const start = Math.max(0, Number(range[0]) || 0);
-    const end = Math.min(geometry.length - 1, Number(range[1]) || start);
+    const end = Math.min(
+      geometry.length - 1,
+      Number(range[1]) || start,
+    );
     const points = geometry.slice(start, end + 1);
     const { gain, maxGrade } = elevationStats(points);
-
-    const steepness = overlappingStepValue(extras, "steepness", start, end);
-    const suitability = overlappingStepValue(extras, "suitability", start, end);
-    const surfaces = overlappingStepValue(extras, "surface", start, end);
-    const suitabilityScore = suitability.length
-      ? Math.min(...suitability)
-      : undefined;
+    const steepness = rangesForStep(extras.steepness?.values, start, end);
+    const suitability = rangesForStep(extras.suitability?.values, start, end);
+    const surfaces = rangesForStep(extras.surface?.values, start, end);
+    const suitabilityScore = suitability.length ? Math.min(...suitability) : undefined;
     const maxGradePercent = Math.max(
       maxGrade,
-      ...steepness.map((value) => steepnessToPercent(value)),
+      ...steepness.map(steepnessToConservativePercent),
     );
+
     const tags: Record<string, string> = {};
     if (suitabilityScore !== undefined) {
       tags.suitability = String(suitabilityScore);
@@ -196,12 +223,11 @@ function buildRouteSegments(
 
     const instruction = typeof step.instruction === "string" ? step.instruction : "";
     if (/stairs|steps/i.test(instruction)) tags.highway = "steps";
-    const elevation = gain > 0 ? gain : 0;
 
     return {
       distance: Math.max(0, Number(step.distance) || 0),
       duration: Math.max(0, Number(step.duration) || 0),
-      elevationGain: elevation,
+      elevationGain: gain,
       maxGradePercent,
       suitabilityScore,
       osmTags: tags,
@@ -240,6 +266,8 @@ export async function fetchAccessibleRoute(
   const baseUrl = (options.baseUrl ?? "https://api.openrouteservice.org/v2").replace(/\/$/, "");
   const endpoint = `${baseUrl}/directions/${profile}/geojson`;
   const fetchFn = options.fetchFn ?? fetch;
+  const maxAllowedGrade = Math.max(1, Math.min(20, options.maxAllowedGradePercent ?? 8.33));
+  const orsMaximumIncline = maxAllowedGrade <= 3 ? 3 : maxAllowedGrade <= 6 ? 6 : maxAllowedGrade <= 10 ? 10 : 15;
 
   let response: Response;
   try {
@@ -259,12 +287,28 @@ export async function fetchAccessibleRoute(
         instructions: true,
         extra_info: ["steepness", "suitability", "surface"],
         units: "m",
+        options: wheelchairMode
+          ? {
+              avoid_features: ["ferries", "steps"],
+              profile_params: {
+                restrictions: {
+                  surface_type: "cobblestone:flattened",
+                  track_type: "grade1",
+                  smoothness_type: "good",
+                  maximum_sloped_kerb: 0.06,
+                  maximum_incline: orsMaximumIncline,
+                },
+              },
+            }
+          : { avoid_features: ["ferries", "steps"] },
       }),
       signal: AbortSignal.timeout(15_000),
     });
   } catch (error) {
     throw new RoutingProviderError(
-      error instanceof Error ? `Routing provider request failed: ${error.message}` : "Routing provider request failed.",
+      error instanceof Error
+        ? `Routing provider request failed: ${error.message}`
+        : "Routing provider request failed.",
       502,
     );
   }
@@ -278,37 +322,28 @@ export async function fetchAccessibleRoute(
     );
   }
 
-  let payload: any;
+  let payload: OrsGeoJsonResponse;
   try {
-    payload = await response.json();
+    payload = (await response.json()) as OrsGeoJsonResponse;
   } catch {
     throw new RoutingProviderError("OpenRouteService returned invalid JSON.");
   }
 
-  const feature = payload?.features?.[0];
-  const geometry = feature?.geometry?.coordinates;
+  const feature = payload.features?.[0];
+  const rawCoordinates = feature?.geometry?.coordinates;
   const properties = feature?.properties;
-  const segments = properties?.segments;
-  const rawSteps = Array.isArray(segments)
-    ? segments.flatMap((segment: any) => Array.isArray(segment.steps) ? segment.steps : [])
-    : [];
-  if (
-    !Array.isArray(geometry) ||
-    geometry.length < 2 ||
-    !Array.isArray(segments) ||
-    segments.length === 0
-  ) {
+  const rawSteps = properties?.segments?.flatMap((segment) => segment.steps ?? []) ?? [];
+  if (!Array.isArray(rawCoordinates) || rawCoordinates.length < 2 || !properties?.segments?.length) {
     throw new RoutingProviderError("OpenRouteService response did not contain route geometry and segments.");
   }
 
-  const normalizedGeometry = geometry.filter(
-    (point: unknown) =>
-      Array.isArray(point) &&
-      point.length >= 2 &&
-      Number.isFinite(Number(point[0])) &&
-      Number.isFinite(Number(point[1])),
-  ) as number[][];
-  if (normalizedGeometry.length < 2) {
+  const geometry: number[][] = [];
+  for (const rawPoint of rawCoordinates) {
+    if (!Array.isArray(rawPoint) || rawPoint.length < 2) continue;
+    const point = rawPoint.map(Number);
+    if (point.every(Number.isFinite)) geometry.push(point);
+  }
+  if (geometry.length < 2) {
     throw new RoutingProviderError("OpenRouteService route geometry is invalid.");
   }
 
@@ -318,27 +353,27 @@ export async function fetchAccessibleRoute(
       : [{
           distance: properties.summary?.distance,
           duration: properties.summary?.duration,
-          way_points: [0, normalizedGeometry.length - 1],
+          way_points: [0, geometry.length - 1],
         }],
-    normalizedGeometry,
+    geometry,
     properties.extras ?? {},
   );
 
-  const maxIncline = options.maxAllowedGradePercent ?? 8.33;
   const evaluation = new AccessibleRouter().evaluateRoute(
     routeSegments,
     wheelchairMode,
-    maxIncline,
+    maxAllowedGrade,
   );
 
   const warnings: string[] = [];
   const barriers: AccessibleRouteResult["barriers"] = [];
   routeSegments.forEach((segment, index) => {
-    const wayPoints = rawSteps[index]?.way_points ?? [0, normalizedGeometry.length - 1];
-    const point = normalizedGeometry[Math.max(0, Math.min(normalizedGeometry.length - 1, Number(wayPoints[0]) || 0))];
+    const range = rawSteps[index]?.way_points ?? [0, geometry.length - 1];
+    const pointIndex = Math.max(0, Math.min(geometry.length - 1, Number(range[0]) || 0));
+    const point = geometry[pointIndex];
     if (!point) return;
 
-    if (/steps|stairs/.test(segment.osmTags.highway ?? "")) {
+    if (segment.osmTags.highway === "steps") {
       const message = "This route segment contains stairs.";
       warnings.push(message);
       barriers.push({
@@ -349,7 +384,7 @@ export async function fetchAccessibleRoute(
         message,
       });
     }
-    if ((segment.maxGradePercent ?? 0) > maxIncline) {
+    if ((segment.maxGradePercent ?? 0) > maxAllowedGrade) {
       const message = `Steep incline detected (${(segment.maxGradePercent ?? 0).toFixed(1)}%).`;
       warnings.push(message);
       barriers.push({
@@ -374,7 +409,7 @@ export async function fetchAccessibleRoute(
   });
 
   return {
-    geometry: normalizedGeometry,
+    geometry,
     totalDistanceMeters: Number(properties.summary?.distance) || evaluation.totalDistance,
     totalDurationSeconds: Number(properties.summary?.duration) || evaluation.totalDuration,
     evaluation,

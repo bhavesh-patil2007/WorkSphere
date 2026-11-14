@@ -465,7 +465,7 @@ export async function searchVenuesWithRrf(
         FROM "Venue" v
         WHERE SIMILARITY(v."name", ${searchQuery}) >= ${minSimilarity}
         ${venueFilters}
-        ORDER BY SIMILARITY(v."name", ${searchQuery}) DESC, v."id"
+        ORDER BY score DESC, v."id"
         LIMIT ${candidateLimit}
       `);
 

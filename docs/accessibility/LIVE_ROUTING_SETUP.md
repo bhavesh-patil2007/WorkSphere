@@ -6,7 +6,7 @@ The accessibility route and distance-matrix APIs use OpenRouteService's wheelcha
 
 Set `ORS_API_KEY` in the server environment. Do not expose this key through a `NEXT_PUBLIC_` variable or send it from the browser. The route provider is called server-side.
 
-The provider requests GeoJSON directions with elevation and the `steepness`, `suitability`, and `surface` extras. These are mapped to the existing `RouteSegment` contract and evaluated by `AccessibleRouter`.
+The provider requests GeoJSON directions with elevation and the `steepness`, `suitability`, and `surface` extras. For wheelchair routing it also asks ORS to avoid ferries and steps and applies wheelchair profile restrictions for surface, track quality, smoothness, sloped kerbs, and maximum incline. These values are mapped to the existing `RouteSegment` contract and evaluated by `AccessibleRouter`.
 
 ## Route request
 

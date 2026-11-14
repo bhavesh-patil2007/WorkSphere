@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import type { Prisma } from "@prisma/client";
 import { SLACalculator, SLAThresholds } from "@/core/audit/SLACalculator";
 import { TelemetryAggregator, TelemetryPoint } from "@/core/audit/TelemetryAggregator";
 import { VenuePenaltyEngine } from "@/core/audit/VenuePenaltyEngine";
@@ -115,7 +116,7 @@ export async function POST(request: NextRequest) {
             complianceScore: null,
             isCompliant: null,
             penaltyPoints: null,
-            violations: undefined,
+            violations: Prisma.DbNull,
           },
         });
         results.push({ venueId: venue.id, status: audit.status, sampleCount: records.length });
@@ -171,7 +172,7 @@ export async function POST(request: NextRequest) {
             complianceScore: slaResult.complianceScore,
             isCompliant: slaResult.isCompliant,
             penaltyPoints,
-            violations: violations as any,
+            violations: violations as Prisma.InputJsonValue,
           },
           update: {
             status: "COMPLETE",
@@ -183,7 +184,7 @@ export async function POST(request: NextRequest) {
             complianceScore: slaResult.complianceScore,
             isCompliant: slaResult.isCompliant,
             penaltyPoints,
-            violations: violations as any,
+            violations: violations as Prisma.InputJsonValue,
           },
         });
         await tx.venue.update({

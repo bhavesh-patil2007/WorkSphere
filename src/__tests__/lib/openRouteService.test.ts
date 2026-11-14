@@ -62,6 +62,9 @@ describe("OpenRouteService accessible routing", () => {
     expect(result.geometry).toHaveLength(2);
     expect(result.evaluation.accessibilityScore).toBeGreaterThanOrEqual(40);
     expect(result.dataSource).toBe("OpenRouteService");
+    const requestBody = JSON.parse((fetchFn.mock.calls[0][1] as RequestInit).body as string);
+    expect(requestBody.options.avoid_features).toContain("steps");
+    expect(requestBody.options.profile_params.restrictions.maximum_incline).toBe(10);
   });
 
   it("fails explicitly when the provider is not configured", async () => {

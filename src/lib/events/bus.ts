@@ -1,5 +1,6 @@
 import { getRedis } from "@/lib/redis";
 import { prisma } from "@/lib/prisma";
+import type { WebhookEventType } from "@prisma/client";
 import { WebhookEvent } from "./schemas";
 
 // Kept for compatibility with older workers and operational tooling.
@@ -27,7 +28,7 @@ export const EventBus = {
         data: {
           id: fullEvent.id,
           userId: fullEvent.userId,
-          eventType: fullEvent.type as any,
+          eventType: fullEvent.type as WebhookEventType,
           data: fullEvent.data,
           state: "PENDING",
           nextAttemptAt: new Date(),

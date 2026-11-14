@@ -8,6 +8,7 @@ import {
 } from "@/lib/events/outbox";
 import { deliverWebhookEvent } from "@/lib/webhooks/deliver";
 import type { DeliveryResult } from "@/lib/notifications/types";
+import type { WebhookEventType } from "@prisma/client";
 import { isAuthorizedCronRequest } from "@/lib/cronAuth";
 
 export const dynamic = "force-dynamic";
@@ -49,7 +50,7 @@ async function processOutboxEvent(event: Awaited<ReturnType<typeof claimDueWebho
   try {
     results = await deliverWebhookEvent(
       event.userId,
-      event.eventType as any,
+      event.eventType as WebhookEventType,
       event.data as Record<string, unknown>,
       {
         eventId: event.id,
