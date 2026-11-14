@@ -135,7 +135,10 @@ model Venue {
   isWellLit           Boolean             @default(false) // OSM lit=yes along walking route
   hasCCTV             Boolean             @default(false) // CCTV visible on premises
   safetyScore         Int?     // 1-5 crowdsourced safety rating for night workers
-  ratings             VenueRating[]
+  slaPenaltyPoints     Int                 @default(0)
+  slaComplianceScore   Float?
+  slaLastAuditedAt     DateTime?
+  ratings              VenueRating[]
   favorites           Favorite[]
   bookings            Booking[]
   creatorId           String?
@@ -162,9 +165,35 @@ model Venue {
   beaconPathLossExponent Float?
   seatWaitlists       VenueSeatWaitlist[]
   liveFeedbacks       VenueLiveFeedback[]
+  slaAudits            VenueSlaAudit[]
 
   @@index([latitude, longitude])
   @@index([category])
+}
+
+
+model VenueSlaAudit {
+  id                         String   @id @default(cuid())
+  venueId                    String
+  venue                      Venue    @relation(fields: [venueId], references: [id], onDelete: Cascade)
+  periodStart                DateTime
+  periodEnd                  DateTime
+  thresholdVersion           String
+  status                     String
+  sampleCount                Int      @default(0)
+  avgWifiSpeedMbps           Float?
+  wifiUptimePercent          Float?
+  avgNoiseLevelDb            Float?
+  avgSeatAvailabilityPercent Float?
+  complianceScore            Float?
+  isCompliant                Boolean?
+  penaltyPoints              Int?
+  violations                 Json?
+  createdAt                  DateTime @default(now())
+
+  @@unique([venueId, periodStart, periodEnd, thresholdVersion])
+  @@index([venueId, periodEnd])
+  @@index([periodStart, periodEnd])
 }
 
 model VenueLiveFeedback {
@@ -730,6 +759,27 @@ model WebhookDeliveryLog {
   @@index([endpointId])
   @@index([createdAt])
   @@index([endpointId, createdAt])
+}
+
+
+model WebhookOutboxEvent {
+  id                           String           @id
+  userId                       String
+  eventType                    WebhookEventType
+  data                         Json
+  state                        String           @default("PENDING")
+  attempts                     Int              @default(0)
+  completedEndpointIds         String[]         @default([])
+  permanentFailureEndpointIds  String[]         @default([])
+  lastError                    String?
+  nextAttemptAt                DateTime         @default(now())
+  lockedUntil                  DateTime?
+  deadLetteredAt               DateTime?
+  createdAt                    DateTime         @default(now())
+  updatedAt                    DateTime         @updatedAt
+
+  @@index([state, nextAttemptAt])
+  @@index([state, lockedUntil])
 }
 
 model FolderInvite {
