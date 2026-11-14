@@ -51,7 +51,7 @@ async function processOutboxEvent(event: Awaited<ReturnType<typeof claimDueWebho
     results = await deliverWebhookEvent(
       event.userId,
       event.eventType as WebhookEventType,
-      event.data as Record<string, unknown>,
+      event.data as unknown as Record<string, unknown>,
       {
         eventId: event.id,
         excludeEndpointIds: Array.from(completed),
