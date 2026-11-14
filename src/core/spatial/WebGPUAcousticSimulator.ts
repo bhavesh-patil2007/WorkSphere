@@ -9,14 +9,11 @@ import {
   DEFAULT_RAY_COUNT,
   GRID_CELLS,
   MAX_OCCUPANTS,
-  SOURCE_BLOCK_BYTES,
   SPEED_OF_SOUND_MS,
   TIME_BINS,
   WORKGROUP_SIZE,
   analyzeAcousticOutput,
   packMaterialTable,
-  packSourceBlock,
-  resolveAcousticSources,
   validateAcousticInput,
   type AcousticOptions,
   type AcousticResult,
@@ -26,8 +23,7 @@ import {
 
 export * from "./acousticTypes";
 
-/** Uniform block: room/ray params followed by density scale and source count. */
-export const ACOUSTIC_PARAMS_BYTES = 112;
+const PARAMS_BYTES = 96;
 const MAP_READ = 1; // GPUMapMode.READ, as a literal so this file loads outside browsers
 const FRAME_BUDGET_MS = 16;
 const DEFAULT_SEED = 0x9e3779b9;
@@ -44,8 +40,6 @@ export interface SimulatorCreateOptions {
 export interface BenchmarkReport {
   backend: "webgpu" | "cpu";
   runs: number;
-  /** Active emitters aggregated per run. */
-  sourceCount: number;
   medianMs: number;
   p95Ms: number;
   budgetMs: number;
@@ -63,7 +57,6 @@ interface GpuResources {
   pipeline: GPUComputePipeline;
   bindGroup: GPUBindGroup;
   params: GPUBuffer;
-  sources: GPUBuffer;
   occupants: GPUBuffer;
   histogram: GPUBuffer;
   density: GPUBuffer;
@@ -107,11 +100,7 @@ async function initGpu(): Promise<GpuResources> {
   device.queue.writeBuffer(materials, 0, materialTable);
 
   const params = device.createBuffer({
-    size: ACOUSTIC_PARAMS_BYTES,
-    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-  });
-  const sources = device.createBuffer({
-    size: SOURCE_BLOCK_BYTES,
+    size: PARAMS_BYTES,
     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
   });
   const occupants = device.createBuffer({
@@ -145,7 +134,6 @@ async function initGpu(): Promise<GpuResources> {
       { binding: 2, resource: { buffer: occupants } },
       { binding: 3, resource: { buffer: histogram } },
       { binding: 4, resource: { buffer: density } },
-      { binding: 5, resource: { buffer: sources } },
     ],
   });
 
@@ -154,7 +142,6 @@ async function initGpu(): Promise<GpuResources> {
     pipeline,
     bindGroup,
     params,
-    sources,
     occupants,
     histogram,
     density,
@@ -254,7 +241,6 @@ export class WebGPUAcousticSimulator {
     runs = 30,
     options: AcousticOptions = {},
   ): Promise<BenchmarkReport> {
-    const sourceCount = resolveAcousticSources(scene).length;
     for (let i = 0; i < 3; i++) await this.simulate(scene, options); // warm up
     const samples: number[] = [];
     for (let i = 0; i < runs; i++) {
@@ -270,7 +256,6 @@ export class WebGPUAcousticSimulator {
     return {
       backend: this.backend,
       runs,
-      sourceCount,
       medianMs,
       p95Ms,
       budgetMs: FRAME_BUDGET_MS,
@@ -303,7 +288,6 @@ export class WebGPUAcousticSimulator {
     const rayCount = options.rayCount ?? DEFAULT_RAY_COUNT;
     const maxBounces = options.maxBounces ?? DEFAULT_MAX_BOUNCES;
     validateAcousticInput(scene, rayCount, maxBounces);
-    const sourceCount = resolveAcousticSources(scene).length;
     const start = performance.now();
 
     if (this.gpu) {
@@ -320,7 +304,6 @@ export class WebGPUAcousticSimulator {
           backend: "webgpu",
           rayCount,
           maxBounces,
-          sourceCount,
           gpuMs,
           totalMs: performance.now() - start,
           ...analyzeAcousticOutput(raw),
@@ -338,7 +321,6 @@ export class WebGPUAcousticSimulator {
       backend: "cpu",
       rayCount,
       maxBounces,
-      sourceCount,
       gpuMs: null,
       totalMs: performance.now() - start,
       ...analyzeAcousticOutput(raw),
@@ -355,32 +337,8 @@ export class WebGPUAcousticSimulator {
   ): Promise<{ raw: RawAcousticOutput; gpuMs: number }> {
     const { device } = g;
     const occ = scene.occupants ?? [];
-    const sources = resolveAcousticSources(scene);
 
-    // Scale the integer accumulators by the hottest source band so high-energy
-    // spectra cannot overflow the u32 atomics during long multi-bounce runs.
-    let maxSourceEnergy = 1;
-    for (const source of sources) {
-      for (const band of source.spectrum) {
-        maxSourceEnergy = Math.max(maxSourceEnergy, band * source.gain);
-      }
-    }
-    const energyScale = Math.min(
-      65536,
-      Math.max(1, Math.floor(4_000_000_000 / (rayCount * maxSourceEnergy))),
-    );
-    const densityScale = Math.min(
-      256,
-      Math.max(
-        1,
-        Math.floor(
-          4_000_000_000 /
-            (rayCount * Math.max(1, maxBounces) * maxSourceEnergy),
-        ),
-      ),
-    );
-
-    const buf = new ArrayBuffer(ACOUSTIC_PARAMS_BYTES);
+    const buf = new ArrayBuffer(PARAMS_BYTES);
     const f32 = new Float32Array(buf);
     const u32 = new Uint32Array(buf);
     f32.set(scene.roomMin, 0);
@@ -392,12 +350,9 @@ export class WebGPUAcousticSimulator {
     f32[12] = SPEED_OF_SOUND_MS;
     f32[13] = BIN_DURATION_S;
     u32[14] = rayCount;
-    f32[15] = energyScale;
+    f32[15] = Math.min(65536, Math.floor(4_000_000_000 / rayCount)); // keeps per-band sums inside u32
     u32.set(scene.wallMaterials, 16);
-    f32[24] = densityScale;
-    u32[25] = sources.length;
     device.queue.writeBuffer(g.params, 0, buf);
-    device.queue.writeBuffer(g.sources, 0, packSourceBlock(sources));
 
     const occData = new Float32Array(MAX_OCCUPANTS * 4);
     occ.forEach((o, i) => {
