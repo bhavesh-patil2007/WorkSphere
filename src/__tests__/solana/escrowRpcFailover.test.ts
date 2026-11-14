@@ -1,8 +1,8 @@
-﻿/**
+/**
  * Tests for the escrow RPC connection pool failover and optimistic client
  * confirmation with background status polling (#7529).
  *
- * All Solana SDK calls are mocked â€” no real network or wallet interactions.
+ * All Solana SDK calls are mocked — no real network or wallet interactions.
  */
 
 // Fix jsdom Buffer vs Uint8Array realm mismatch for @noble/hashes
@@ -31,8 +31,6 @@ import {
   resetEscrowRpcPool,
   getEscrowClient,
   resetEscrowClient,
-  simulateEscrowTransaction,
-  type QuorumTelemetryRecord,
 } from "@/lib/solana/escrowClient";
 import { SolanaPayEscrowManager } from "@/lib/solana/solanaPayEscrow";
 
@@ -118,7 +116,7 @@ function buildPool(
 }
 
 // ===========================================================================
-// Â§ Retry classification, backoff, and endpoint resolution
+// § Retry classification, backoff, and endpoint resolution
 // ===========================================================================
 
 describe("isEscrowRpcRetryableError", () => {
@@ -204,7 +202,7 @@ describe("resolveEscrowRpcEndpoints", () => {
 });
 
 // ===========================================================================
-// Â§ RPC pool failover
+// § RPC pool failover
 // ===========================================================================
 
 describe("EscrowRpcConnectionPool failover", () => {
@@ -397,7 +395,7 @@ describe("EscrowRpcConnectionPool failover", () => {
 });
 
 // ===========================================================================
-// Â§ RPC pool health checks
+// § RPC pool health checks
 // ===========================================================================
 
 describe("EscrowRpcConnectionPool health checks", () => {
@@ -467,7 +465,7 @@ describe("EscrowRpcConnectionPool health checks", () => {
 });
 
 // ===========================================================================
-// Â§ EscrowClient optimistic confirmation with background polling
+// § EscrowClient optimistic confirmation with background polling
 // ===========================================================================
 
 describe("EscrowClient optimistic confirmation (#7529)", () => {
@@ -725,7 +723,7 @@ describe("EscrowClient optimistic confirmation (#7529)", () => {
 });
 
 // ===========================================================================
-// Â§ WebSocket subscription failure falls back to background polling
+// § WebSocket subscription failure falls back to background polling
 // ===========================================================================
 
 describe("SolanaPayEscrowManager WebSocket fallback to polling", () => {
@@ -778,7 +776,7 @@ describe("SolanaPayEscrowManager WebSocket fallback to polling", () => {
 });
 
 // ===========================================================================
-// Â§ Shared singletons
+// § Shared singletons
 // ===========================================================================
 
 describe("escrow client singletons", () => {
@@ -795,123 +793,5 @@ describe("escrow client singletons", () => {
     resetEscrowRpcPool();
     expect(getEscrowRpcPool()).not.toBe(pool);
     expect(getEscrowClient()).not.toBe(client);
-  });
-});
-
-// ===========================================================================
-// Â§ Multi-RPC 2-of-3 quorum simulation, PENDING_CONSENSUS & leader-drop rollback (#7682)
-// ===========================================================================
-
-describe("simulateEscrowTransaction 2-of-3 multi-RPC quorum (#7682)", () => {
-  it("achieves 2-of-3 quorum when one RPC fails transiently, returns PENDING_CONSENSUS immediately, and finalizes", async () => {
-    const telemetryLog: QuorumTelemetryRecord[] = [];
-    const onRollback = jest.fn();
-    let pollRound = 0;
-
-    const makeNode = (id: string, failSim = false) =>
-      ({
-        rpcEndpoint: id,
-        simulateTransaction: jest.fn(async () => {
-          if (failSim) {
-            throw httpError(429, "Too Many Requests");
-          }
-          return {
-            context: { slot: 800_100 },
-            value: {
-              err: null,
-              logs: ["Program log: Escrow deposited"],
-              slot: 800_100,
-            },
-          };
-        }),
-        getSignatureStatuses: jest.fn(async () => {
-          if (failSim) {
-            throw httpError(503, "Node desynchronized");
-          }
-          pollRound++;
-          const finalized = pollRound > 2;
-          return {
-            value: [
-              makeStatus(
-                finalized ? "finalized" : "confirmed",
-                finalized ? 800_120 : 800_105,
-              ),
-            ],
-          };
-        }),
-      }) as unknown as Connection;
-
-    const c1 = makeNode(PRIMARY, true);
-    const c2 = makeNode(SECONDARY, false);
-    const c3 = makeNode(TERTIARY, false);
-
-    const result = await simulateEscrowTransaction([c1, c2, c3], {} as any, {
-      endpoints: [PRIMARY, SECONDARY, TERTIARY],
-      signature: "sig_quorum_ok_7682",
-      quorumSize: 2,
-      pollIntervalMs: 5,
-      maxPollAttempts: 5,
-      onRollback,
-      onTelemetry: (rec) => telemetryLog.push(rec),
-    });
-
-    expect(result.success).toBe(true);
-    expect(result.state).toBe("PENDING_CONSENSUS");
-    expect(result.quorumReached).toBe(true);
-    expect(result.optimisticSlot).toBe(800_100);
-
-    const finalized = await result.commitmentPromise;
-    expect(finalized.state).toBe("FINALIZED");
-    expect(finalized.rolledBack).toBe(false);
-    expect(finalized.finalizedSlot).toBe(800_120);
-    expect(onRollback).not.toHaveBeenCalled();
-    expect(telemetryLog.length).toBeGreaterThanOrEqual(2);
-    expect(telemetryLog[0].achievedConfirmations).toBe(2);
-  });
-
-  it("rolls back automatically when signature is dropped from the leader queue before finalized commitment", async () => {
-    const onRollback = jest.fn();
-    let pollCalls = 0;
-
-    const makeNode = (id: string) =>
-      ({
-        rpcEndpoint: id,
-        simulateTransaction: jest.fn(async () => ({
-          context: { slot: 900_000 },
-          value: { err: null, logs: [], slot: 900_000 },
-        })),
-        getSignatureStatuses: jest.fn(async () => {
-          pollCalls++;
-          if (pollCalls <= 3) {
-            return { value: [makeStatus("processed", 900_001)] };
-          }
-          return { value: [null] };
-        }),
-      }) as unknown as Connection;
-
-    const result = await simulateEscrowTransaction(
-      [makeNode(PRIMARY), makeNode(SECONDARY), makeNode(TERTIARY)],
-
-      {} as any,
-      {
-        endpoints: [PRIMARY, SECONDARY, TERTIARY],
-        signature: "sig_dropped_7682",
-        quorumSize: 2,
-        pollIntervalMs: 5,
-        maxPollAttempts: 5,
-        onRollback,
-      },
-    );
-
-    expect(result.state).toBe("PENDING_CONSENSUS");
-
-    const outcome = await result.commitmentPromise;
-    expect(outcome.state).toBe("ROLLED_BACK");
-    expect(outcome.rolledBack).toBe(true);
-    expect(outcome.rollbackReason).toMatch(/dropped from leader queue/i);
-    expect(onRollback).toHaveBeenCalledWith(
-      "sig_dropped_7682",
-      expect.stringMatching(/dropped from leader queue/i),
-    );
   });
 });

@@ -27,8 +27,6 @@ export const dynamic = "force-dynamic";
 import {
   buildDepositTransaction,
   confirmTransaction,
-  simulateEscrowTransaction,
-  getEscrowRpcPool,
   verifyDeposit,
   validateDepositParams,
   releaseEscrow,
@@ -57,7 +55,6 @@ const confirmRequestSchema = z.object({
   amount: z.number().positive("amount must be positive"),
   currency: z.enum(["SOL", "USDC"]),
   signature: z.string().min(1, "transaction signature is required"),
-  serializedTransaction: z.string().min(1).optional(),
 });
 
 const releaseRequestSchema = z.object({
@@ -259,66 +256,7 @@ async function handleConfirm(body: unknown, userId: string) {
     );
   }
 
-  const {
-    bookingId,
-    payerWallet,
-    amount,
-    currency,
-    signature,
-    serializedTransaction,
-  } = parsed.data;
-
-  if (serializedTransaction) {
-    const pool = getEscrowRpcPool();
-    const endpoints = pool.getHealthReport().map((h) => h.endpoint);
-    const activeConn = await pool.getActiveConnection();
-    const quorumSim = await simulateEscrowTransaction(
-      activeConn,
-
-      serializedTransaction as any,
-      {
-        endpoints,
-        signature,
-        onRollback: (sig, reason) => {
-          console.warn(
-            "[solana-pay] Rolled back optimistic escrow confirmation",
-            {
-              bookingId,
-              signature: sig,
-              reason,
-            },
-          );
-        },
-      },
-    );
-
-    if (!quorumSim.quorumReached) {
-      return NextResponse.json(
-        {
-          error: quorumSim.error ?? "Escrow simulation failed quorum consensus",
-          state: quorumSim.state,
-          telemetry: quorumSim.telemetry,
-        },
-        { status: 502 },
-      );
-    }
-
-    quorumSim.commitmentPromise.catch(() => {});
-
-    return NextResponse.json(
-      {
-        success: true,
-        data: {
-          state: quorumSim.state,
-          bookingId,
-          signature,
-          optimisticSlot: quorumSim.optimisticSlot,
-          telemetry: quorumSim.telemetry,
-        },
-      },
-      { status: 202 },
-    );
-  }
+  const { bookingId, payerWallet, amount, currency, signature } = parsed.data;
 
   // Verify booking ownership
   const booking = await prisma.booking.findUnique({

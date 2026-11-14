@@ -1,4 +1,4 @@
-﻿import { NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { rateLimit } from "@/lib/rateLimit";
@@ -17,37 +17,13 @@ const VALID_REASONS = [
 
 type FlagReason = (typeof VALID_REASONS)[number];
 
-const MIN_REASON_NON_WHITESPACE_LENGTH = 5;
-
 const flagVenueSchema = z.object({
-  reason: z
-    .string({
-      error: "Reason must contain at least 5 non-whitespace characters",
-    })
-    .trim()
-    .refine(
-      (val) =>
-        val.replace(/\s+/g, "").length >= MIN_REASON_NON_WHITESPACE_LENGTH,
-      {
-        message: "Reason must contain at least 5 non-whitespace characters",
-      },
-    )
-    .refine(
-      (val): val is FlagReason =>
-        (VALID_REASONS as readonly string[]).includes(val),
-      {
-        message: `Invalid reason. Must be one of: ${VALID_REASONS.join(", ")}`,
-      },
-    ),
-  details: z.string().trim().optional(),
+  reason: z.enum(VALID_REASONS, {
+    error: `Invalid reason. Must be one of: ${VALID_REASONS.join(", ")}`,
+  }),
 });
 
-interface FlagVenueBody {
-  reason: FlagReason;
-  details?: string;
-}
-
-export const POST = apiHandler<FlagVenueBody, { venueId: string }>({
+export const POST = apiHandler<{ reason: FlagReason }, { venueId: string }>({
   authRequired: true,
   schema: flagVenueSchema,
   handler: async ({ body, params, userId }) => {
@@ -62,8 +38,7 @@ export const POST = apiHandler<FlagVenueBody, { venueId: string }>({
     }
 
     const { venueId } = params;
-    const reason = body.reason.trim() as FlagReason;
-    const details = body.details?.trim();
+    const { reason } = body;
 
     const venue = await prisma.venue.findUnique({
       where: { id: venueId },
@@ -95,8 +70,7 @@ export const POST = apiHandler<FlagVenueBody, { venueId: string }>({
         itemId: venueId,
         reason,
         reportedById: userId!,
-        ...(details ? { details } : {}),
-      } as Parameters<typeof prisma.flaggedItem.create>[0]["data"],
+      },
     });
 
     await invalidateVenueReviewsCache(venueId);
