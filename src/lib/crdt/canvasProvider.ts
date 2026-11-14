@@ -521,9 +521,9 @@ function yieldToMainThread(): Promise<void> {
 /**
  * Serialize IndexedDB readwrite transactions for a journal database.
  *
- * A database-scoped queue is shared by every CanvasChangeJournal instance in
- * this JavaScript runtime, so compaction and append/replay writes cannot open
- * conflicting readwrite transactions against the same stores concurrently.
+ * The queue is database-scoped, so different CanvasChangeJournal instances
+ * sharing the same IndexedDB database cannot race their read-modify-write,
+ * compaction, or replay transactions.
  */
 const journalWriteQueues = new Map<string, Promise<void>>();
 
@@ -533,10 +533,7 @@ function withJournalWriteLock<T>(
 ): Promise<T> {
   const previous = journalWriteQueues.get(databaseName) ?? Promise.resolve();
   const current = previous.catch(() => undefined).then(operation);
-  const settled = current.then(
-    () => undefined,
-    () => undefined,
-  );
+  const settled = current.then(() => undefined, () => undefined);
   journalWriteQueues.set(databaseName, settled);
   void settled.then(() => {
     if (journalWriteQueues.get(databaseName) === settled) {
@@ -611,7 +608,6 @@ export class CanvasChangeJournal {
     return withJournalWriteLock(this.dbName, async () => {
       const trimmed = roomName.trim();
       const db = await this.getDb();
-
       const tx = db.transaction([JOURNAL_META_STORE, JOURNAL_STORE], "readwrite");
       const metaStore = tx.objectStore(JOURNAL_META_STORE);
       const journalStore = tx.objectStore(JOURNAL_STORE);
@@ -739,6 +735,8 @@ export class CanvasChangeJournal {
     throughSeq: number,
   ): Promise<CanvasCompactionResult> {
     return withJournalWriteLock(this.dbName, async () => {
+      const record: CanvasSnapshot = {
+        ...snapshot,
         roomName: snapshot.roomName.trim(),
       };
       const db = await this.getDb();
@@ -746,19 +744,19 @@ export class CanvasChangeJournal {
         [SNAPSHOT_STORE, JOURNAL_STORE, JOURNAL_META_STORE],
         "readwrite",
       );
-  
+
       const snapshotStore = tx.objectStore(SNAPSHOT_STORE);
       const journalStore = tx.objectStore(JOURNAL_STORE);
       const metaStore = tx.objectStore(JOURNAL_META_STORE);
-  
+
       await snapshotStore.put(record);
-  
+
       const blocks = await journalStore.index("by-room").getAll(record.roomName);
       const superseded = blocks.filter((block) => block.seq <= throughSeq);
       await Promise.all(
         superseded.map((block) => journalStore.delete(block.seq)),
       );
-  
+
       const meta = await metaStore.get(record.roomName);
       await metaStore.put({
         ...meta,
@@ -767,9 +765,9 @@ export class CanvasChangeJournal {
         opsAtSnapshot: record.opsAtSnapshot,
         compactedAt: record.createdAt,
       });
-  
+
       await tx.done;
-  
+
       return {
         snapshot: record,
         deletedRecords: superseded.length,
@@ -778,7 +776,6 @@ export class CanvasChangeJournal {
           0,
         ),
       };
-    }
     });
   }
 }
