@@ -255,8 +255,7 @@ export function BrainTerminal({
       ref={containerRef}
       data-testid="brain-terminal-container"
       tabIndex={-1}
-      className="brain-terminal-panel"
-      className={`glass-card rounded-2xl p-6 glow-accent mx-auto overflow-hidden transition-all duration-300 ${
+      className={`brain-terminal-panel glass-card rounded-2xl p-6 glow-accent mx-auto overflow-hidden transition-all duration-300 ${
         isMaximized ? "max-w-3xl w-full" : "max-w-lg"
       } ${className}`}
     >
