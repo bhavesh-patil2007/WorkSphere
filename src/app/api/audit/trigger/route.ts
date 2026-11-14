@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import { SLACalculator, SLAThresholds } from "@/core/audit/SLACalculator";
 import { TelemetryAggregator, TelemetryPoint } from "@/core/audit/TelemetryAggregator";
 import { VenuePenaltyEngine } from "@/core/audit/VenuePenaltyEngine";
@@ -31,8 +31,11 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const periodStart = parseDate(body?.periodStart);
-    const periodEnd = parseDate(body?.periodEnd);
+    const hasPeriodInput = body?.periodStart !== undefined || body?.periodEnd !== undefined;
+    const periodStart = parseDate(body?.periodStart) ?? (
+      hasPeriodInput ? null : new Date(Date.now() - 24 * 60 * 60 * 1000)
+    );
+    const periodEnd = parseDate(body?.periodEnd) ?? (hasPeriodInput ? null : new Date());
     if (!periodStart || !periodEnd || periodStart >= periodEnd) {
       return NextResponse.json(
         { error: "Valid periodStart and periodEnd timestamps are required." },
@@ -43,7 +46,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Audit period cannot exceed 31 days." }, { status: 400 });
     }
 
-    const venueIds = body?.venueIds;
+    // Preserve compatibility with the original trigger payload, but ignore its
+    // client-supplied telemetry and re-read measurements from PostgreSQL.
+    const venueIds = body?.venueIds ??
+      (Array.isArray(body?.venues)
+        ? body.venues.map((venue: { id?: unknown }) => venue?.id)
+        : undefined);
     if (
       venueIds !== undefined &&
       (!Array.isArray(venueIds) ||
@@ -129,7 +137,7 @@ export async function POST(request: NextRequest) {
         return {
           timestamp: record.timestamp.getTime(),
           wifiSpeedMbps: record.download ?? 0,
-          wifiConnected: record.presence !== false && (record.download ?? 0) > 0,
+          wifiConnected: record.presence !== false,
           noiseLevelDb: record.noiseLevel ?? 0,
           seatsAvailable: Math.max(0, capacity - occupancy),
           totalSeats: capacity,

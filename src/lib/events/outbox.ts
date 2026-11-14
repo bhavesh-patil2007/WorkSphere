@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 export const WEBHOOK_OUTBOX_MAX_ATTEMPTS = 5;
 const BASE_RETRY_DELAY_MS = 60_000;
 const MAX_RETRY_DELAY_MS = 24 * 60 * 60 * 1000;
-const PROCESSING_LEASE_MS = 60_000;
+const PROCESSING_LEASE_MS = 90_000;
 
 export function computeWebhookRetryDelayMs(
   attempt: number,
