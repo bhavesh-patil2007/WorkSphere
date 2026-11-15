@@ -12,6 +12,7 @@ export const EVENT_TYPES: { value: string; label: string }[] = [
   { value: "BOOKING_CANCELLED", label: "Booking cancelled" },
   { value: "BOOKING_RESCHEDULED", label: "Booking rescheduled" },
   { value: "VENUE_CREATED", label: "Venue added" },
+  { value: "VENUE_FLAGGED", label: "Venue flagged (moderators)" },
   { value: "REVIEW_SUBMITTED", label: "Review submitted" },
   { value: "AI_WORKFLOW_COMPLETED", label: "AI search completed" },
   { value: "MAP_GEOFENCE_BREACHED", label: "Arrived at venue" },
