@@ -272,7 +272,7 @@ export function StorageStatsDrawer({
       if (successTimerRef.current) clearTimeout(successTimerRef.current);
       successTimerRef.current = setTimeout(() => {
         if (isMountedRef.current) setSuccessMessage(null);
-      }, 4000);
+      }, successAnnouncementTimeoutMs);
     } catch (err) {
       console.error("[StorageStatsDrawer] Failed to clear offline cache:", err);
       if (isMountedRef.current) {
