@@ -126,6 +126,7 @@ describe("POST /api/venues/[venueId]/flag", () => {
         details: "Doors locked with notice on window",
         reportedById: "user-123",
       }),
+      select: { id: true },
     });
   });
 
