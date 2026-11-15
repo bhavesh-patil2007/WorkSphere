@@ -110,16 +110,37 @@ Errors use the shared `apiError` format:
 For validation failures, the middleware may also include a `details` object
 containing field-level messages.
 
+
+## Moderator webhook event
+
+Newly persisted reports emit the `VENUE_FLAGGED` event to active webhook endpoints owned by users whose `isAdmin` flag is true and who subscribed to that event type. A duplicate pending report does not emit a second event. Delivery is asynchronous and uses the existing signed webhook envelope and delivery log; the flag submission remains successful if scheduling a notification fails. Endpoint notification-window preferences continue to apply.
+
+The envelope follows the shared webhook contract:
+
+```json
+{
+  "id": "evt_<generated-id>",
+  "type": "VENUE_FLAGGED",
+  "timestamp": "2026-11-15T12:00:00.000Z",
+  "data": {
+    "flagId": "flag-record-id",
+    "venueId": "venue-record-id",
+    "reason": "wrong_hours",
+    "details": "The posted closing time is incorrect.",
+    "reportedById": "reporting-user-id"
+  }
+}
+```
+
+The example values are illustrative. The receiver should treat `flagId` as the idempotency key for its own processing and should not assume that delivery is exactly once. Webhook requests include the existing signed headers (`webhook-id`, `webhook-timestamp`, and `webhook-signature`, plus their Svix-compatible aliases). Verify the signature against the unmodified request body before processing the event. Only administrators can receive this event through their own subscribed endpoints; reporter identity is represented by an opaque user ID, not a name or email address.
+
 ## Persistence and moderation notifications
 
 The current handler writes a `FlaggedItem` row with `type: "VENUE"`,
 `itemId`, `reason`, `reportedById`, optional `details`, and the model's
 default pending status. It then invalidates the venue reviews cache.
 
-**No moderator webhook is dispatched by this route today.** There is therefore
-no truthful outbound webhook payload schema to document yet. A webhook
-contract should be added alongside an actual delivery mechanism (including
-retry/idempotency behavior) before clients or moderators rely on it.
+The moderator webhook is dispatched only after a new pending flag is stored. The event contract and delivery behavior are described above.
 
 ## Implementation references
 
