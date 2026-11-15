@@ -5,6 +5,7 @@ import { rateLimit } from "@/lib/rateLimit";
 import { apiError } from "@/lib/apiResponse";
 import { apiHandler } from "@/lib/apiHandler";
 import { invalidateVenueReviewsCache } from "@/lib/cache/swrCache";
+import { emitWebhookEvent } from "@/lib/notifications/channels/webhookChannel";
 
 const VALID_REASONS = [
   "permanently_closed",
@@ -89,7 +90,7 @@ export const POST = apiHandler<FlagVenueBody, { venueId: string }>({
       );
     }
 
-    await prisma.flaggedItem.create({
+    const flag = await prisma.flaggedItem.create({
       data: {
         type: "VENUE",
         itemId: venueId,
@@ -97,7 +98,28 @@ export const POST = apiHandler<FlagVenueBody, { venueId: string }>({
         reportedById: userId!,
         ...(details ? { details } : {}),
       } as Parameters<typeof prisma.flaggedItem.create>[0]["data"],
+      select: { id: true },
     });
+
+    // Notify configured webhook endpoints owned by moderators only. Delivery is
+    // scheduled by emitWebhookEvent and must not make flag submission fail.
+    try {
+      const moderators = await prisma.user.findMany({
+        where: { isAdmin: true },
+        select: { id: true },
+      });
+      for (const moderator of moderators) {
+        emitWebhookEvent(moderator.id, "VENUE_FLAGGED", {
+          flagId: flag.id,
+          venueId,
+          reason,
+          details: details ?? null,
+          reportedById: userId!,
+        });
+      }
+    } catch (notificationError) {
+      console.error("[venue-flag] Failed to schedule moderator webhook:", notificationError);
+    }
 
     await invalidateVenueReviewsCache(venueId);
 
