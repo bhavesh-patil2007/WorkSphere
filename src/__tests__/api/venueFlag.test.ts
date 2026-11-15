@@ -3,6 +3,7 @@ import { NextRequest } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { rateLimit } from "@/lib/rateLimit";
 import { prisma } from "@/lib/prisma";
+import { emitWebhookEvent } from "@/lib/notifications/channels/webhookChannel";
 
 // Mock Clerk auth
 jest.mock("@clerk/nextjs/server", () => ({
@@ -15,8 +16,15 @@ jest.mock("@/lib/rateLimit", () => ({
 }));
 
 // Mock Prisma
+jest.mock("@/lib/notifications/channels/webhookChannel", () => ({
+  emitWebhookEvent: jest.fn(),
+}));
+
 jest.mock("@/lib/prisma", () => ({
   prisma: {
+    user: {
+      findMany: jest.fn().mockResolvedValue([]),
+    },
     venue: {
       findUnique: jest.fn().mockResolvedValue({ id: "venue-123" }),
     },
@@ -49,6 +57,41 @@ describe("POST /api/venues/[venueId]/flag", () => {
       { params: Promise.resolve({ venueId: "venue-123" }) },
     );
     expect(response.status).toBe(200);
+  });
+
+  it("schedules a VENUE_FLAGGED webhook for each admin after a new report", async () => {
+    (prisma.user.findMany as jest.Mock).mockResolvedValueOnce([
+      { id: "moderator-1" },
+      { id: "moderator-2" },
+    ]);
+
+    const response = await POST(
+      makeRequest("venue-123", {
+        reason: "wrong_hours",
+        details: "The posted closing time is incorrect.",
+      }),
+      { params: Promise.resolve({ venueId: "venue-123" }) },
+    );
+
+    expect(response.status).toBe(200);
+    expect(emitWebhookEvent).toHaveBeenNthCalledWith(
+      1,
+      "moderator-1",
+      "VENUE_FLAGGED",
+      expect.objectContaining({
+        flagId: "flag-1",
+        venueId: "venue-123",
+        reason: "wrong_hours",
+        details: "The posted closing time is incorrect.",
+        reportedById: "user-123",
+      }),
+    );
+    expect(emitWebhookEvent).toHaveBeenNthCalledWith(
+      2,
+      "moderator-2",
+      "VENUE_FLAGGED",
+      expect.objectContaining({ flagId: "flag-1", venueId: "venue-123" }),
+    );
   });
 
   it("returns 400 when reason is whitespace-only or fewer than 5 non-whitespace characters", async () => {
