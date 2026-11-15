@@ -336,6 +336,7 @@ describe("StorageStatsDrawer Component (#6899)", () => {
             onClose={mockOnClose}
             initialStats={sampleHealthyStats}
             onClearCache={mockOnClearCache}
+            successAnnouncementTimeoutMs={1500}
           />,
         );
       });
@@ -351,9 +352,11 @@ describe("StorageStatsDrawer Component (#6899)", () => {
       expect(
         screen.queryByTestId("confirm-clear-cache-modal"),
       ).not.toBeInTheDocument();
-      expect(
-        screen.getByTestId("storage-stats-success-message"),
-      ).toHaveTextContent("Offline cache successfully cleared!");
+      const announcement = screen.getByTestId("storage-stats-success-message");
+      expect(announcement).toHaveAttribute("role", "status");
+      expect(announcement).toHaveAttribute("aria-live", "polite");
+      expect(announcement).toHaveAttribute("aria-atomic", "true");
+      expect(announcement).toHaveTextContent("Offline cache successfully cleared.");
     });
   });
 
