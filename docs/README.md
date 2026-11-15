@@ -14,4 +14,10 @@
 - [Cryptographic booking receipt specification](./security/cryptographic-receipt-spec.md)
 - [WebAuthn passkey security guide](./security/passkey-webauthn-guide.md)
 
+## Additional guides
+
+- [Offline sync testing playbook](./testing/OFFLINE_SYNC_TESTING_PLAYBOOK.md) — IndexedDB failures, Web Locks, network transitions and Playwright recipes.
+- [Community badge catalog](./badges/BADGE_CATALOG.md) — implemented badges, verified earning rules and registry guidance.
+- [Solana escrow refund lifecycle](./solana/SOLANA_ESCROW_REFUND_CRON.md) — escrow states, cron transitions, configuration and local testing.
+- [Venue flagging API](./api/VENUE_FLAGGING.md) — request validation, authentication, rate limits and response formats.
 - [WebGPU acoustic simulation](./audio/WEBGPU_ACOUSTIC_SIMULATION.md) — WGSL bindings, buffer layouts, stackless BVH traversal, CPU fallback and benchmarking.
