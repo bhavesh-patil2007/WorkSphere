@@ -56,6 +56,19 @@ export async function createWebhookEndpoint(data: {
   }
   const { url, eventTypes, headers = {} } = parsed.data;
 
+  if (eventTypes.includes(WebhookEventType.VENUE_FLAGGED)) {
+    const currentUser = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { isAdmin: true },
+    });
+    if (!currentUser?.isAdmin) {
+      return {
+        ok: false,
+        error: "Only moderator accounts can subscribe to venue-flagged events.",
+      };
+    }
+  }
+
   if (process.env.NODE_ENV === "production" && !url.startsWith("https://")) {
     return { ok: false, error: "Webhook URLs must use HTTPS." };
   }
