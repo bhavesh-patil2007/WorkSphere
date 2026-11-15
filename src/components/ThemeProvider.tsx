@@ -66,7 +66,7 @@ function applyTheme(theme: Theme, animate = false) {
 
   if (
     animate &&
-    !window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
+    !window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches
   ) {
     root.classList.add("theme-transitioning");
     if (themeTransitionTimeout !== undefined) {
