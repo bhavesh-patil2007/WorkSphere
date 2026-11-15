@@ -54,6 +54,25 @@ The worker currently records these delivery states:
 - `FAILED` when dispatching fails.
 - `SKIPPED_OUTSIDE_WINDOW` when a user-level notification window blocks delivery.
 
+## Outgoing event types
+
+| Event type | Recipient / trigger |
+| --- | --- |
+| `BOOKING_CONFIRMED` | A user's subscribed endpoint when a booking is confirmed |
+| `BOOKING_CANCELLED` | A user's subscribed endpoint when a booking is cancelled |
+| `BOOKING_RESCHEDULED` | A user's subscribed endpoint when a booking is rescheduled |
+| `VENUE_CREATED` | A user's subscribed endpoint when a venue is added |
+| `VENUE_FLAGGED` | Active endpoints owned by administrators who subscribe to moderator venue reports |
+| `REVIEW_SUBMITTED` | A user's subscribed endpoint when a review is submitted |
+| `AI_WORKFLOW_COMPLETED` | A user's subscribed endpoint when an AI workflow completes |
+| `MAP_GEOFENCE_BREACHED` | A user's subscribed endpoint when a geofence is breached |
+| `DOCUMENT_SIGNED` | A user's subscribed endpoint when a document is signed |
+
+Only users with `isAdmin = true` may create an endpoint subscription for
+`VENUE_FLAGGED`. The backend checks this permission even if a client sends
+the event type manually. A report is delivered to active subscribed moderator
+endpoints, not to the reporting user's endpoints.
+
 ## Retry policy
 
 Webhooks use an exponential backoff policy for transient failures.
