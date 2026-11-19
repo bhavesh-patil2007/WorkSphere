@@ -51,11 +51,20 @@ describe("VectorClock", () => {
     expect(clock.increment("alice")).toBe(1);
     expect(clock.increment("alice")).toBe(2);
     expect(clock.increment("bob")).toBe(1);
-    expect(clock.toJSON()).toEqual({ alice: 2, bob: 1 });
+    expect(clock.getClock()).toEqual({ alice: 2, bob: 1 });
 
     const snapshot = clock.toMap();
     snapshot.set("alice", 100);
     expect(clock.get("alice")).toBe(2);
+  });
+
+  it("preserves the original local-node constructor and increment API", () => {
+    const local = new VectorClock("peer-a", { "peer-b": 3 });
+    expect(local.getNodeId()).toBe("peer-a");
+    expect(local.getClock()).toEqual({ "peer-a": 0, "peer-b": 3 });
+
+    expect(local.increment()).toEqual({ "peer-a": 1, "peer-b": 3 });
+    expect(local.compareTo({ "peer-a": 2, "peer-b": 3 })).toBe("BEFORE");
   });
 
   it("merges component-wise maxima and is idempotent, commutative, and associative", () => {
@@ -65,20 +74,26 @@ describe("VectorClock", () => {
 
     const mergedAB = new VectorClock(a).merge(b);
     const mergedBA = new VectorClock(b).merge(a);
-    expect(mergedAB.toJSON()).toEqual({ alice: 2, bob: 4 });
-    expect(mergedAB.toJSON()).toEqual(mergedBA.toJSON());
+    expect(mergedAB.getClock()).toEqual({ alice: 2, bob: 4 });
+    expect(mergedAB.getClock()).toEqual(mergedBA.getClock());
 
-    const beforeRepeat = mergedAB.toJSON();
+    const beforeRepeat = mergedAB.getClock();
     mergedAB.merge(b);
-    expect(mergedAB.toJSON()).toEqual(beforeRepeat);
+    expect(mergedAB.getClock()).toEqual(beforeRepeat);
 
     const leftAssociated = new VectorClock(a).merge(b).merge(c);
     const rightAssociated = new VectorClock(a).merge(new VectorClock(b).merge(c));
-    expect(leftAssociated.toJSON()).toEqual(rightAssociated.toJSON());
+    expect(leftAssociated.getClock()).toEqual(rightAssociated.getClock());
   });
 
-  it("round-trips a stable JSON snapshot", () => {
-    const original = new VectorClock({ "peer-z": 4, "peer-a": 1, "peer-b": 2 });
+  it("accepts Map inputs and round-trips a stable JSON snapshot", () => {
+    const original = new VectorClock(
+      new Map([
+        ["peer-z", 4],
+        ["peer-a", 1],
+        ["peer-b", 2],
+      ]),
+    );
     const encoded = JSON.stringify(original);
     const restored = new VectorClock(JSON.parse(encoded));
 
@@ -122,10 +137,12 @@ describe("VectorClock", () => {
 
   it("rejects empty node ids, negative counters, unsafe counters, and counter overflow", () => {
     expect(() => new VectorClock({ "": 1 })).toThrow("non-empty string");
-    expect(() => new VectorClock({ alice: -1 })).toThrow("non-negative safe integer");
-    expect(() => new VectorClock({ alice: Number.MAX_SAFE_INTEGER + 1 })).toThrow(
+    expect(() => new VectorClock({ alice: -1 })).toThrow(
       "non-negative safe integer",
     );
+    expect(() =>
+      new VectorClock({ alice: Number.MAX_SAFE_INTEGER + 1 }),
+    ).toThrow("non-negative safe integer");
 
     const clock = new VectorClock({ alice: Number.MAX_SAFE_INTEGER });
     expect(() => clock.increment("alice")).toThrow("safe integer range");
